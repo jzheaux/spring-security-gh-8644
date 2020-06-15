@@ -24,14 +24,14 @@ import org.springframework.security.firewall.Gh8644StrictHttpFirewall;
 public class Gh8644StrictHttpFirewallTests {
 	private static final int MAX_HEADER_SIZE = 8192;
 
-	// To remove a use case, comment it out in the map as well as the @Param annotation
-
 	private Map<String, HttpServletRequest> requests = new HashMap<String, HttpServletRequest>()
 	{{
 		put("largeBody", largeBody());
 		put("largeHeader", largeHeader());
 		put("largeBodyAndHeader", largeBodyAndHeader());
 	}};
+
+	// To remove a use case, comment it out in the @Param annotation
 
 	@Param({
 			"largeBody",
