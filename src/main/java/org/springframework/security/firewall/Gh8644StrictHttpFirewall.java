@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -31,6 +32,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.web.firewall.FirewalledRequest;
 import org.springframework.security.web.firewall.HttpFirewall;
 import org.springframework.security.web.firewall.RequestRejectedException;
+import org.springframework.util.CollectionUtils;
 
 /**
  * <p>
@@ -129,13 +131,13 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 
 	private Predicate<String> allowedHostnames = hostname -> true;
 
-	private Predicate<String> allowedHeaderNames = name -> name.codePoints().allMatch(codePoint -> !Character.isISOControl(codePoint) && Character.isDefined(codePoint));
+	private Predicate<Iterable<String>> allowedHeaderNames = names -> true;
 
-	private Predicate<String> allowedHeaderValues = value -> value.codePoints().allMatch(codePoint -> !Character.isISOControl(codePoint) && Character.isDefined(codePoint));
+	private Predicate<Iterable<String>> allowedHeaderValues = values -> true;
 
-	private Predicate<String> allowedParameterNames = name -> name.codePoints().allMatch(codePoint -> !Character.isISOControl(codePoint) && Character.isDefined(codePoint));
+	private Predicate<Iterable<String>> allowedParameterNames = names -> true;
 
-	private Predicate<String> allowedParameterValues = value -> true;
+	private Predicate<Iterable<String>> allowedParameterValues = value -> true;
 
 	public Gh8644StrictHttpFirewall() {
 		urlBlocklistsAddAll(FORBIDDEN_SEMICOLON);
@@ -387,7 +389,7 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 	 * @see Character#isDefined(int)
 	 * @since 5.4
 	 */
-	public void setAllowedHeaderNames(Predicate<String> allowedHeaderNames) {
+	public void setAllowedHeaderNames(Predicate<Iterable<String>> allowedHeaderNames) {
 		if (allowedHeaderNames == null) {
 			throw new IllegalArgumentException("allowedHeaderNames cannot be null");
 		}
@@ -406,7 +408,7 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 	 * @see Character#isDefined(int)
 	 * @since 5.4
 	 */
-	public void setAllowedHeaderValues(Predicate<String> allowedHeaderValues) {
+	public void setAllowedHeaderValues(Predicate<Iterable<String>> allowedHeaderValues) {
 		if (allowedHeaderValues == null) {
 			throw new IllegalArgumentException("allowedHeaderValues cannot be null");
 		}
@@ -430,7 +432,7 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 	 * @see Character#isDefined(int)
 	 * @since 5.4
 	 */
-	public void setAllowedParameterNames(Predicate<String> allowedParameterNames) {
+	public void setAllowedParameterNames(Predicate<Iterable<String>> allowedParameterNames) {
 		if (allowedParameterNames == null) {
 			throw new IllegalArgumentException("allowedParameterNames cannot be null");
 		}
@@ -446,7 +448,7 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 	 * @param allowedParameterValues the predicate for testing parameter values
 	 * @since 5.4
 	 */
-	public void setAllowedParameterValues(Predicate<String> allowedParameterValues) {
+	public void setAllowedParameterValues(Predicate<Iterable<String>> allowedParameterValues) {
 		if (allowedParameterValues == null) {
 			throw new IllegalArgumentException("allowedParameterValues cannot be null");
 		}
@@ -509,34 +511,24 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 	}
 
 	private void rejectDisallowedHeaders(HttpServletRequest request) {
-		Enumeration<String> namesEnumeration = request.getHeaderNames();
-		while (namesEnumeration.hasMoreElements()) {
-			String name = namesEnumeration.nextElement();
-			if (!allowedHeaderNames.test(name)) {
-				throw new RequestRejectedException("The request was rejected because the header name \"" + name + "\" is not allowed.");
-			}
-			Enumeration<String> valuesEnumeration = request.getHeaders(name);
-			while (valuesEnumeration.hasMoreElements()) {
-				String value = valuesEnumeration.nextElement();
-				if (!allowedHeaderValues.test(value)) {
-					throw new RequestRejectedException("The request was rejected because the header value \"" + value + "\" is not allowed.");
-				}
-			}
+		Iterable<String> names = () -> CollectionUtils.toIterator(request.getHeaderNames());
+		if (!this.allowedHeaderNames.test(names)) {
+			throw new RequestRejectedException("The request was rejected because one of the header names is not allowed.");
+		}
+		Iterable<String> values = () -> new HeaderValuesIterable(request);
+		if (!this.allowedHeaderValues.test(values)) {
+			throw new RequestRejectedException("The request was rejected because one of the header values is not allowed.");
 		}
 	}
 
 	private void rejectDisallowedParameters(HttpServletRequest request) {
-		Enumeration<String> namesEnumeration = request.getParameterNames();
-		while (namesEnumeration.hasMoreElements()) {
-			String name = namesEnumeration.nextElement();
-			if (!allowedParameterNames.test(name)) {
-				throw new RequestRejectedException("The request was rejected because the parameter name \"" + name + "\" is not allowed.");
-			}
-			for (String value: request.getParameterValues(name)) {
-				if (!allowedParameterValues.test(value)) {
-					throw new RequestRejectedException("The request was rejected because the parameter value \"" + value + "\" is not allowed.");
-				}
-			}
+		Iterable<String> names = () -> CollectionUtils.toIterator(request.getParameterNames());
+		if (!this.allowedParameterNames.test(names)) {
+			throw new RequestRejectedException("The request was rejected because one of the parameter names is not allowed.");
+		}
+		Iterable<String> values = () -> new ParameterValuesIterable(request);
+		if (!this.allowedParameterValues.test(values)) {
+			throw new RequestRejectedException("The request was rejected because one of the parameter values is not allowed.");
 		}
 	}
 
@@ -678,5 +670,70 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 	 */
 	public Set<String> getDecodedUrlBlacklist() {
 		return getDecodedUrlBlocklist();
+	}
+
+
+	private static class HeaderValuesIterable implements Iterator<String> {
+		private final HttpServletRequest request;
+		private final Enumeration<String> headerNames;
+
+		private String currentHeaderName;
+		private Enumeration<String> headerValues;
+
+		public HeaderValuesIterable(HttpServletRequest request) {
+			this.request = request;
+			this.headerNames = request.getHeaderNames();
+		}
+
+		@Override
+		public boolean hasNext() {
+			return this.headerNames.hasMoreElements() || hasMoreValues();
+		}
+
+		@Override
+		public String next() {
+			if (this.currentHeaderName == null || !hasMoreValues()) {
+				this.currentHeaderName = this.headerNames.nextElement();
+				this.headerValues = this.request.getHeaders(this.currentHeaderName);
+			}
+			return this.headerValues.nextElement();
+		}
+
+		private boolean hasMoreValues() {
+			return this.headerValues != null && headerValues.hasMoreElements();
+		}
+	}
+
+	private static class ParameterValuesIterable implements Iterator<String> {
+		private final HttpServletRequest request;
+		private final Enumeration<String> parameterNames;
+
+		private String currentParameterName;
+		private String[] parameterValues;
+		int current;
+
+		public ParameterValuesIterable(HttpServletRequest request) {
+			this.request = request;
+			this.parameterNames = request.getParameterNames();
+		}
+
+		@Override
+		public boolean hasNext() {
+			return this.parameterNames.hasMoreElements() || hasMoreValues();
+		}
+
+		@Override
+		public String next() {
+			if (this.currentParameterName == null || !hasMoreValues()) {
+				this.currentParameterName = this.parameterNames.nextElement();
+				this.parameterValues = this.request.getParameterValues(this.currentParameterName);
+				this.current = 0;
+			}
+			return this.parameterValues[current++];
+		}
+
+		private boolean hasMoreValues() {
+			return this.parameterValues != null && current < this.parameterValues.length;
+		}
 	}
 }
