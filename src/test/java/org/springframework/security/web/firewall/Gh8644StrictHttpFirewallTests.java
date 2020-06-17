@@ -2,6 +2,7 @@ package org.springframework.security.web.firewall;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -57,9 +58,12 @@ public class Gh8644StrictHttpFirewallTests {
 		MockHttpServletRequest large = new MockHttpServletRequest();
 		MockHttpServletRequest largeBody = largeBody();
 		MockHttpServletRequest largeHeader = largeHeader();
-		String parameterName = largeBody.getParameterNames().nextElement();
 		large.setMethod("GET");
-		large.setParameter(parameterName, largeBody.getParameter(parameterName));
+		Enumeration<String> parameterNames = largeBody.getParameterNames();
+		while (parameterNames.hasMoreElements()) {
+			String parameterName = parameterNames.nextElement();
+			large.setParameter(parameterName, largeBody.getParameter(parameterName));
+		}
 		large.setServerName(largeHeader.getServerName());
 		large.addHeader("header", largeHeader.getHeader("header"));
 		large.setRequestURI(largeHeader.getRequestURI());
@@ -69,10 +73,14 @@ public class Gh8644StrictHttpFirewallTests {
 	private static MockHttpServletRequest largeBody() {
 		try {
 			// a large request body
-			byte[] parameterName = Files.readAllBytes(Paths.get("two-megabyte-request.log"));
+			byte[] body = Files.readAllBytes(Paths.get("two-megabyte-request.log"));
 
 			MockHttpServletRequest request = new MockHttpServletRequest();
-			request.setParameter(new String(parameterName), "v");
+			for (int i = 0; i < 10000; i++) {
+				byte[] parameterName = new byte[body.length / 10000];
+				System.arraycopy(body, i * parameterName.length, parameterName, 0, parameterName.length);
+				request.setParameter(new String(parameterName), "v");
+			}
 
 			request.setMethod("GET");
 			request.setServerName("host");
