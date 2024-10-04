@@ -10,7 +10,7 @@
 
 	<properties>
 		<java.version>1.8</java.version>
-		<spring-security.version>5.4.0-M1</spring-security.version>
+		<spring-security.version>5.5.0-M1</spring-security.version>
 		<jmh.version>1.19</jmh.version>
 	</properties>
 
